@@ -74,7 +74,7 @@ def legal_consult_system(index, train_df, model):
         
         try:
             text_vec = model.encode([text]).astype('float32')
-            index.nprobe = 75  # 增加 nprobe 到 75
+            index.nprobe = 75  # 最近鄰的k個質心
             k = 7  # 調整 k 到 7
             distances, indices = index.search(text_vec, k=k)
             
