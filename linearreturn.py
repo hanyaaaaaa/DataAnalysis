@@ -14,7 +14,7 @@ except Exception as e:
 
 # 過濾無刑期數據並添加對數變換
 df_with_sentence = df[df['刑期(天)'] > 0].copy()
-df_with_sentence['刑期(天)_log'] = np.log1p(df_with_sentence['刑期(天)'])
+df_with_sentence['刑期(天)_log'] = np.log1p(df_with_sentence['刑期(天)']) #對刑期數據進行對數變換（log(1 + x)），這可以壓縮數據範圍，處理偏態分佈
 print(f"過濾後數據量: {len(df_with_sentence)} 行")
 
 # 載入嵌入模型

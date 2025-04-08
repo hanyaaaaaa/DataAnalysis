@@ -44,7 +44,7 @@ try:
     time.sleep(5)  # 等待幾秒鐘以確保搜尋結果載入完成
     
     idx = 0  # 初始化索引
-    idxx= 267
+    idxx= 413
     
     while True:
         try:

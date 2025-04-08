@@ -4,7 +4,7 @@ import pandas as pd
 from sentence_transformers import SentenceTransformer
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
-
+# 連家妮犯三人以上共同詐欺取財罪，共二罪，測試用
 # 讀取數據
 try:
     df = pd.read_csv('C:/Users/李/Desktop/數據分析/outputarea/Tovector.csv')
@@ -12,8 +12,9 @@ except Exception as e:
     print(f"❌ 無法讀取數據文件: {e}")
     exit()
 
-# 過濾無刑期數據
+# 過濾無刑期數據並檢查數據完整性
 df_with_sentence = df[df['刑期(天)'] > 0].copy()
+df_with_sentence = df_with_sentence.dropna(subset=['刑期(天)'])  # 移除刑期為 NaN 的行
 print(f"過濾後數據量: {len(df_with_sentence)} 行")
 
 # 載入原始嵌入模型
@@ -37,16 +38,17 @@ train_embeddings = model.encode(train_df["原始內容"].tolist()).astype('float
 test_embeddings = model.encode(test_df["原始內容"].tolist()).astype('float32')
 
 # 設置 K-Means 參數
-ncentroids = max(2, len(train_df) // 20)  # 增加聚類數量到約 11
-niter = 50       # 增加迭代次數
+ncentroids = max(2, len(train_df) // 20)  
+niter = 50       # 迭代次數
 verbose = True   # 顯示訓練過程
 print(f"聚類數量 (ncentroids): {ncentroids}")
 
 # 獲取嵌入維度
 d = train_embeddings.shape[1]
+print(f"維度數量{d}")
 
 # 創建量化器 (quantizer)
-quantizer = faiss.IndexFlatL2(d)
+quantizer = faiss.IndexFlatL2(d) # 使用 歐式距離 度量
 
 # 創建使用 K-Means 聚類的 IndexIVFFlat 索引
 index = faiss.IndexIVFFlat(quantizer, d, ncentroids, faiss.METRIC_L2)
@@ -78,7 +80,13 @@ def legal_consult_system(index, train_df, model):
             
             print("\n★ 相似判例分析:")
             weights = np.exp(-distances[0])  # 使用指數衰減權重
-            weights /= weights.sum()  # 歸一化權重
+            # 檢查權重是否有效
+            if not np.isfinite(weights).all() or weights.sum() == 0:
+                print("⚠️ 權重計算異常，使用均勻權重")
+                weights = np.ones_like(distances[0]) / len(distances[0])
+            else:
+                weights /= weights.sum()  # 歸一化權重
+            
             for i, idx in enumerate(indices[0]):
                 case = train_df.iloc[idx]
                 similarity = 1 / (1 + distances[0][i])
@@ -86,8 +94,17 @@ def legal_consult_system(index, train_df, model):
                 print(f"  實際刑期：{case['刑期(天)']}天 | 相似度：{similarity:.2%}")
             
             similar_sentences = train_df.iloc[indices[0]]['刑期(天)']
-            weighted_average_sentence = np.average(similar_sentences, weights=weights)
-            print(f"\n基於相似判例，加權預估刑期為: {weighted_average_sentence:.2f} 天")
+            # 檢查刑期數據是否有效
+            if not np.isfinite(similar_sentences).all():
+                print("⚠️ 相似案例刑期數據中包含無效值，無法計算預估刑期")
+                weighted_average_sentence = np.nan
+            else:
+                weighted_average_sentence = np.average(similar_sentences, weights=weights)
+            
+            if np.isnan(weighted_average_sentence):
+                print("\n基於相似判例，加權預估刑期為: 無法計算（數據異常）")
+            else:
+                print(f"\n基於相似判例，加權預估刑期為: {weighted_average_sentence:.2f} 天")
         except Exception as e:
             print(f"❌ 輸入錯誤: {e}，請重新輸入")
 
@@ -99,11 +116,28 @@ def calculate_metrics(index, test_df, train_df, model):
         text_vec = model.encode([row["原始內容"]]).astype('float32')
         distances, indices = index.search(text_vec, k=7)  # k=7
         weights = np.exp(-distances[0])  # 使用指數衰減權重
-        weights /= weights.sum()
+        if not np.isfinite(weights).all() or weights.sum() == 0:
+            weights = np.ones_like(distances[0]) / len(distances[0])
+        else:
+            weights /= weights.sum()
+        
         similar_sentences = train_df.iloc[indices[0]]['刑期(天)']
-        predicted_sentence = np.average(similar_sentences, weights=weights)
+        if not np.isfinite(similar_sentences).all():
+            predicted_sentence = np.nan
+        else:
+            predicted_sentence = np.average(similar_sentences, weights=weights)
+        
         predictions.append(predicted_sentence)
         actuals.append(row['刑期(天)'])
+    
+    # 移除預測值中的 nan
+    valid_indices = [i for i, pred in enumerate(predictions) if not np.isnan(pred)]
+    predictions = [predictions[i] for i in valid_indices]
+    actuals = [actuals[i] for i in valid_indices]
+    
+    if len(predictions) == 0:
+        print("⚠️ 所有預測值均為無效，無法計算評估指標")
+        return
     
     mse = mean_squared_error(actuals, predictions)
     rmse = np.sqrt(mse)
